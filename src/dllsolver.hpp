@@ -45,6 +45,7 @@ class DLLCostFunction
         double c0, c1, c2, c3, c4, c5, c6, c7;
         sa = sin(a);
         ca = cos(a);
+        // 绕 z-轴的旋转角度a和平移
         nx = ca*_px - sa*_py + tx;
         ny = sa*_px + ca*_py + ty;
         nz = _pz + tz;
@@ -61,10 +62,10 @@ class DLLCostFunction
                 double dxa, dya;
                 dxa = _py*ca + _px*sa;
                 dya = _px*ca - _py*sa;
-                jacobians[0][0] = _weight*(c1 + c5*nz + c4*ny + c7*nz*ny);
-                jacobians[0][1] = _weight*(c2 + c6*nz + c4*nx + c7*nz*nx);
-                jacobians[0][2] = _weight*(c3 + c5*nx + c6*ny + c7*nx*ny);
-                jacobians[0][3] = _weight*(c2*dya - c1*dxa + c4*dya*nx - c4*dxa*ny - c5*nz*dxa + c6*nz*dya + c7*nz*dya*nx - c7*nz*dxa*ny);
+                jacobians[0][0] = _weight*(c1 + c5*nz + c4*ny + c7*nz*ny); // ∂residual / ∂tx
+                jacobians[0][1] = _weight*(c2 + c6*nz + c4*nx + c7*nz*nx); // ∂residual / ∂ty
+                jacobians[0][2] = _weight*(c3 + c5*nx + c6*ny + c7*nx*ny); // ∂residual / ∂tz
+                jacobians[0][3] = _weight*(c2*dya - c1*dxa + c4*dya*nx - c4*dxa*ny - c5*nz*dxa + c6*nz*dya + c7*nz*dya*nx - c7*nz*dxa*ny); // ∂residual / ∂a
             }
         }
         else

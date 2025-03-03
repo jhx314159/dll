@@ -1,0 +1,15 @@
+<!--
+-->
+<launch>
+  
+  <!-- Use simulation time for TFs -->
+  <param name="/use_sim_time" value="true" /> 
+
+  <group ns="dll_ns">
+    <param name="pcl_map_path" value="$(find dll)/maps/guangzhou_port_map-0.5m.pcd" />
+    <param name="leaf_size"    value="0.5" />
+    <!-- Launch DLL -->
+    <node name="map_generator_node" type="map_generator_node" pkg="dll" output="screen">
+    </node>
+  </group>
+</launch>	

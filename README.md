@@ -1,5 +1,20 @@
 # DLL: Direct Lidar Localization
 
+# git指令
+
+```bash
+git add .
+git commit -m '修改lioloc.cpp，支持p2s和GICP分开执行4'
+git push origin point-lio-with-grid-map
+```
+## 编译运行指令
+
+```bash
+catkin_make -j10
+source devel/setup.bash
+roslaunch dll dll-guangzhou_port.launch
+```
+
 ## Summary
 This package presents DLL, a direct map-based localization technique using 3D LIDAR for its application to aerial robots. DLL implements a point cloud to map registration based on non-linear optimization of the distance of the points and the map, thus not requiring  features, neither point correspondences. Given an initial pose, the method is able to track the pose of the robot by refining the predicted pose from odometry. The method performs much better than Monte-Carlo localization methods and achieves comparable precision to other optimization-based approaches but running one order of magnitude faster. The method is also robust under odometric errors. 
 

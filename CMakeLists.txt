@@ -118,14 +118,16 @@ include_directories(
 ## Declare a cpp executable
 add_executable(dll_node src/dll_node.cpp)
 target_compile_options(dll_node PRIVATE ${OpenMP_FLAGS})
-add_executable(grid3d_node_dll src/grid3d_node.cpp)
-target_compile_options(grid3d_node_dll PRIVATE ${OpenMP_FLAGS})
-
+add_executable(grid3d_node src/grid3d_node.cpp)
+target_compile_options(grid3d_node PRIVATE ${OpenMP_FLAGS})
+add_executable(map_generator_node src/map_generator_node.cpp)
+target_compile_options(map_generator_node PRIVATE ${OpenMP_FLAGS})
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
 add_dependencies(dll_node ${dllEXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(grid3d_node_dll ${dll_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} )
+add_dependencies(grid3d_node ${dll_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} )
+add_dependencies(map_generator_node ${dll_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} )
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(dll_node
@@ -133,7 +135,11 @@ target_link_libraries(dll_node
    ${CERES_LIBRARIES}
    ${OpenMP_LIBS}
 )
-target_link_libraries(grid3d_node_dll
+target_link_libraries(grid3d_node
+   ${catkin_LIBRARIES}
+   ${OpenMP_LIBS}
+)
+target_link_libraries(map_generator_node
    ${catkin_LIBRARIES}
    ${OpenMP_LIBS}
 )

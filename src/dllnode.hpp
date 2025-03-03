@@ -29,48 +29,52 @@ public:
 
 	//!Default contructor 
 	DLLNode(std::string &node_name) : 
-	m_grid3d(node_name), m_solver(m_grid3d)
+		m_grid3d(node_name), m_solver(m_grid3d)
 	{		
 		// Read node parameters
 		ros::NodeHandle lnh("~");
-		if(!lnh.getParam("in_cloud", m_inCloudTopic))
+		if(!lnh.getParam("/dll_ns/initialPoseByOdom_topic", m_initialPoseByOdomTopic))
+			m_initialPoseByOdomTopic = "/initialPose";	
+		if(!lnh.getParam("/dll_ns/in_cloud", m_inCloudTopic))
 			m_inCloudTopic = "/pointcloud";	
-		if(!lnh.getParam("base_frame_id", m_baseFrameId))
-			m_baseFrameId = "base_link";	
-		if(!lnh.getParam("odom_frame_id", m_odomFrameId))
+		std::cout << "-------------in_cloud = " << m_inCloudTopic<< std::endl;
+
+		if(!lnh.getParam("/dll_ns/base_frame_id", m_baseFrameId))
+			m_baseFrameId = "base_link_dll";	
+		if(!lnh.getParam("/dll_ns/odom_frame_id", m_odomFrameId))
 			m_odomFrameId = "odom";	
-		if(!lnh.getParam("global_frame_id", m_globalFrameId))
+		if(!lnh.getParam("/dll_ns/global_frame_id", m_globalFrameId))
 			m_globalFrameId = "map";	
-		if (!lnh.getParam("use_imu", m_use_imu)) 
+		if (!lnh.getParam("/dll_ns/use_imu", m_use_imu)) 
 			m_use_imu = false;
-		if (!lnh.getParam("use_yaw_increments", m_useYawIncrements)) 
+		if (!lnh.getParam("/dll_ns/use_yaw_increments", m_useYawIncrements)) 
 			m_useYawIncrements = false;
 		m_roll_imu = m_pitch_imu = m_yaw_imu = 0.0;
 		
 		// Read DLL parameters
-		if(!lnh.getParam("update_rate", m_updateRate))
+		if(!lnh.getParam("/dll_ns/update_rate", m_updateRate))
 			m_updateRate = 10.0;
-		if(!lnh.getParam("initial_x", m_initX))
+		if(!lnh.getParam("/dll_ns/initial_x", m_initX))
 			m_initX = 0.0;
-		if(!lnh.getParam("initial_y", m_initY))
+		if(!lnh.getParam("/dll_ns/initial_y", m_initY))
 			m_initY = 0.0;
-		if(!lnh.getParam("initial_z", m_initZ))
+		if(!lnh.getParam("/dll_ns/initial_z", m_initZ))
 			m_initZ = 0.0;
-		if(!lnh.getParam("initial_a", m_initA))
+		if(!lnh.getParam("/dll_ns/initial_a", m_initA))
 			m_initA = 0.0;	
-		if(!lnh.getParam("update_min_d", m_dTh))
+		if(!lnh.getParam("/dll_ns/update_min_d", m_dTh))
 			m_dTh = 0.1;
-		if(!lnh.getParam("update_min_a", m_aTh))
+		if(!lnh.getParam("/dll_ns/update_min_a", m_aTh))
 			m_aTh = 0.1;
-		if (!lnh.getParam("update_min_time", m_tTh))
+		if (!lnh.getParam("/dll_ns/update_min_time", m_tTh))
 			m_tTh = 1.0;
-	    if(!lnh.getParam("initial_z_offset", m_initZOffset))
+	    if(!lnh.getParam("/dll_ns/initial_z_offset", m_initZOffset))
             m_initZOffset = 0.0;  
-		if(!lnh.getParam("align_method", m_alignMethod))
+		if(!lnh.getParam("/dll_ns/align_method", m_alignMethod))
             m_alignMethod = 1;
-		if(!lnh.getParam("solver_max_iter", m_solverMaxIter))
+		if(!lnh.getParam("/dll_ns/solver_max_iter", m_solverMaxIter))
 			m_solverMaxIter = 75;
-		if(!lnh.getParam("solver_max_threads", m_solverMaxThreads))
+		if(!lnh.getParam("/dll_ns/solver_max_threads", m_solverMaxThreads))
 			m_solverMaxThreads = 8;
 		
 		// Init internal variables
@@ -86,33 +90,45 @@ public:
 		m_solver.setMaxNumThreads(m_solverMaxThreads);
 
 		// Launch subscribers
-		m_pcSub = m_nh.subscribe(m_inCloudTopic, 1, &DLLNode::pointcloudCallback, this);
-		m_initialPoseSub = lnh.subscribe("initial_pose", 2, &DLLNode::initialPoseReceived, this);
+		m_pcSub = dll_nh.subscribe(m_inCloudTopic, 100, &DLLNode::pointcloudCallback, this);
+		m_initialPoseSub = dll_nh.subscribe("/initialpose", 100, &DLLNode::initialPoseByRviz, this);
+		m_initialPoseSub = dll_nh.subscribe(m_initialPoseByOdomTopic, 100, &DLLNode::initialPoseByOdom, this);
+		m_GlobalPcPub = dll_nh.advertise<sensor_msgs::PointCloud2>("global_point_cloud", 100, this);
+		lio_odom_pub_ = dll_nh.advertise<nav_msgs::Odometry>("loc_result", 100, this);
+
 		if(m_use_imu)
-			m_imuSub = m_nh.subscribe("imu", 1, &DLLNode::imuCallback, this);
+			m_imuSub = dll_nh.subscribe("imu", 1, &DLLNode::imuCallback, this);
 
 		// Time stamp for periodic update
 		m_lastPeriodicUpdate = ros::Time::now();
 
 		// Launch updater timer
-		updateTimer = m_nh.createTimer(ros::Duration(1.0/m_updateRate), &DLLNode::checkUpdateThresholdsTimer, this);
+		updateTimer = dll_nh.createTimer(ros::Duration(1.0/m_updateRate), &DLLNode::checkUpdateThresholdsTimer, this);
 		
 		// Initialize TF from odom to map as identity
 		m_lastGlobalTf.setIdentity();
-				
-		if(m_initX != 0 || m_initY != 0 || m_initZ != 0 || m_initA != 0)
-		{
-			tf::Pose pose;
-			tf::Vector3 origin(m_initX, m_initY, m_initZ);
-			tf::Quaternion q;
-			q.setRPY(0,0,m_initA);
-
-			pose.setOrigin(origin);
-			pose.setRotation(q);
-			
-			setInitialPose(pose);
-			m_init = true;
-		}
+		
+		// if(!m_init)
+		// {
+		// 	if (m_initX != 0 || m_initY != 0 || m_initZ != 0 || m_initA != 0)
+		// 	{
+		// 		tf::Pose pose;
+		// 		tf::Vector3 origin(m_initX, m_initY, m_initZ);
+		// 		tf::Quaternion q;
+		// 		q.setRPY(0,0,m_initA);
+		//
+		// 		pose.setOrigin(origin);
+		// 		pose.setRotation(q);
+		//		
+		// 		setInitialPose(pose);
+		// 	}
+		// 	else
+		// 	{
+		// 		std::cout << "m_initX, m_initY, m_initZ, m_initA = 0, can not be used to initialize the system!" << std::endl;
+		// 	}
+		// }
+	
+		std::cout << "DLLNode initialization finished!" << std::endl;
 	}
 
 	//!Default destructor
@@ -184,12 +200,12 @@ private:
 		checkUpdateThresholds();
 	}
 
-	void initialPoseReceived(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg)
+	void initialPoseByRviz(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg)
 	{
 		// We only accept initial pose estimates in the global frame
 		if(msg->header.frame_id != m_globalFrameId)
 		{
-			ROS_WARN("Ignoring initial pose in frame \"%s\"; initial poses must be in the global frame, \"%s\"",
+			ROS_WARN("initialPoseByRviz, Ignoring initial pose in frame \"%s\"; initial poses must be in the global frame, \"%s\"",
 			msg->header.frame_id.c_str(),
 			m_globalFrameId.c_str());
 			return;	
@@ -198,15 +214,53 @@ private:
 		// Transform into the global frame
 		tf::Pose pose;
 		tf::poseMsgToTF(msg->pose.pose, pose);
-		//ROS_INFO("Setting pose (%.6f): %.3f %.3f %.3f %.3f", ros::Time::now().toSec(), pose.getOrigin().x(), pose.getOrigin().y(), pose.getOrigin().z(), getYawFromTf(pose));
+		ROS_INFO(
+			"initialPoseByRviz, Setting pose (%.6f): %.3f %.3f %.3f %.3f", 
+			ros::Time::now().toSec(), 
+			pose.getOrigin().x(), pose.getOrigin().y(), pose.getOrigin().z(), 
+			getYawFromTf(pose)
+		);
 		
 		// Initialize the filter
 		setInitialPose(pose);
 	}
 	
+	void initialPoseByOdom(const nav_msgs::OdometryConstPtr &msg)
+	{
+		other_odom = *msg;
+		if(!m_init)
+		{	
+			// We only accept initial pose estimates in the global frame
+			if(msg->header.frame_id != m_globalFrameId)
+			{
+				ROS_WARN(
+					"initialPoseByOdom, Ignoring initial pose in frame \"%s\"; initial poses must be in the global frame, \"%s\"",
+					msg->header.frame_id.c_str(),
+					m_globalFrameId.c_str()
+				);
+				return;	
+			}
+			
+			// Transform into the global frame
+			tf::Pose pose;
+			tf::poseMsgToTF(msg->pose.pose, pose);
+			ROS_INFO(
+				"initialPoseByOdom, Setting pose (Time Stamp: %.6f): x: %.3f, y: %.3f, z: %.3f, yaw: %.3f", 
+				ros::Time::now().toSec(), 
+				pose.getOrigin().x(), pose.getOrigin().y(), pose.getOrigin().z(), 
+				getYawFromTf(pose)
+			);
+			
+			// Initialize the filter
+			setInitialPose(pose);
+		}
+	}
+
 	//! IMU callback
 	void imuCallback(const sensor_msgs::Imu::ConstPtr& msg) 
 	{
+		if(!m_init)
+			return;
 		double r = m_roll_imu;
 		double p = m_pitch_imu;
 		double y = m_yaw_imu;
@@ -231,7 +285,10 @@ private:
 	
 		// If the filter is not initialized then exit
 		if(!m_init)
+		{
+			std::cout << "pointcloudCallback, Not yet initialize" << std::endl;
 			return;
+		}
 			
 		// Check if an update must be performed or not
 		if(!m_doUpdate)
@@ -252,13 +309,77 @@ private:
 		tf::Transform mapTf;
 		mapTf = m_lastGlobalTf * odomTf;
 
+		// 从 transform 中获取四元数
+		tf::Quaternion quaternion0 = mapTf.getRotation();
+		// 将四元数转换为旋转矩阵
+		tf::Matrix3x3 rotation_matrix0(quaternion0);
+		// 提取欧拉角 (Roll, Pitch, Yaw)
+		double roll0, pitch0, yaw0;
+		rotation_matrix0.getRPY(roll0, pitch0, yaw0);
+		std::cout << "mapTf:          "
+				  << mapTf.getOrigin().x() << ", " 
+				  << mapTf.getOrigin().y() << ", " 
+				  << mapTf.getOrigin().z() << ", " 
+				  << roll0 << ", " << pitch0 << ", " << yaw0 
+				  << std::endl;
+		
+		tf::Quaternion quaternion1(
+			other_odom.pose.pose.orientation.x,
+			other_odom.pose.pose.orientation.y,
+			other_odom.pose.pose.orientation.z,
+			other_odom.pose.pose.orientation.w
+		);
+		// 将四元数转换为旋转矩阵
+		tf::Matrix3x3 rotation_matrix1(quaternion1);
+		// 提取欧拉角 (Roll, Pitch, Yaw)
+		double roll1, pitch1, yaw1;
+		rotation_matrix1.getRPY(roll1, pitch1, yaw1);
+		std::cout << "other_odom:      "
+				  << other_odom.pose.pose.position.x << ", " 
+				  << other_odom.pose.pose.position.y << ", " 
+				  << other_odom.pose.pose.position.z << ", " 
+				  << roll1 << ", " << pitch1 << ", " << yaw1 
+				  << std::endl;
+		std::cout << "-----------------------" << std::endl;
+				  
+		m_tfBr.sendTransform(tf::StampedTransform(mapTf, ros::Time::now(), m_globalFrameId, m_baseFrameId));
+		{
+			pcl_ros::transformPointCloud(m_globalFrameId, mapTf, *cloud, m_GlobalPcMsg);
+			m_GlobalPcMsg.header.stamp = ros::Time::now();
+			m_GlobalPcMsg.header.frame_id = m_globalFrameId;
+			m_GlobalPcPub.publish(m_GlobalPcMsg);
+
+			nav_msgs::Odometry odom_msg;
+			// 设置时间戳
+			odom_msg.header.stamp = ros::Time::now();
+			odom_msg.header.frame_id = m_globalFrameId;
+			odom_msg.child_frame_id  = m_baseFrameId;
+			// 提取平移信息
+			tf::Vector3 translation = mapTf.getOrigin();
+			odom_msg.pose.pose.position.x = translation.x();
+			odom_msg.pose.pose.position.y = translation.y();
+			odom_msg.pose.pose.position.z = translation.z();
+			// 提取旋转信息
+			tf::Quaternion rotation = mapTf.getRotation();
+			odom_msg.pose.pose.orientation.x = rotation.x();
+			odom_msg.pose.pose.orientation.y = rotation.y();
+			odom_msg.pose.pose.orientation.z = rotation.z();
+			odom_msg.pose.pose.orientation.w = rotation.w();
+			// 发布
+			lio_odom_pub_.publish(odom_msg);
+		}
+	
 		// Pre-cache transform for point-cloud to base frame and transform the pc
 		if(!m_tfCache)
 		{	
 			try
 			{
-                m_tfListener.waitForTransform(m_baseFrameId, cloud->header.frame_id, ros::Time(0), ros::Duration(2.0));
-                m_tfListener.lookupTransform(m_baseFrameId, cloud->header.frame_id, ros::Time(0), m_pclTf);
+                // m_tfListener.waitForTransform(m_baseFrameId, cloud->header.frame_id, ros::Time(0), ros::Duration(2.0));
+                // m_tfListener.lookupTransform(m_baseFrameId, cloud->header.frame_id, ros::Time(0), m_pclTf);
+				m_pclTf.setIdentity();
+				m_pclTf.frame_id_ = m_baseFrameId;
+				m_pclTf.child_frame_id_ = cloud->header.frame_id;
+				m_pclTf.stamp_ = ros::Time::now();
 				m_tfCache = true;
 			}
 			catch (tf::TransformException ex)
@@ -339,6 +460,20 @@ private:
 		q.setRPY(roll, pitch, yaw);
 		m_lastGlobalTf = tf::Transform(q, tf::Vector3(tx, ty, tz))*odomTf.inverse();
 
+		// 从 transform 中获取四元数
+		tf::Quaternion quaternion2 = m_lastGlobalTf.getRotation();
+		// 将四元数转换为旋转矩阵
+		tf::Matrix3x3 rotation_matrix2(quaternion2);
+		// 提取欧拉角 (Roll, Pitch, Yaw)
+		double roll2, pitch2, yaw2;
+		rotation_matrix2.getRPY(roll2, pitch2, yaw2);
+		std::cout << "m_lastGlobalTf: "
+				  << m_lastGlobalTf.getOrigin().x() << ", " 
+				  << m_lastGlobalTf.getOrigin().y() << ", " 
+				  << m_lastGlobalTf.getOrigin().z() << ", " 
+				  << roll2 << ", " << pitch2 << ", " << yaw2 
+				  << std::endl;
+
 		// Update time and transform information
 		m_lastOdomTf = odomTf;
 		m_doUpdate = false;
@@ -381,6 +516,20 @@ private:
 		q.setRPY(roll, pitch, yaw);
 		m_lastGlobalTf = tf::Transform(q, tf::Vector3(t.x(), t.y(), t.z()+m_initZOffset))*m_lastOdomTf.inverse();
 
+		// 从 transform 中获取四元数
+		tf::Quaternion quaternion2 = m_lastGlobalTf.getRotation();
+		// 将四元数转换为旋转矩阵
+		tf::Matrix3x3 rotation_matrix2(quaternion2);
+		// 提取欧拉角 (Roll, Pitch, Yaw)
+		double roll2, pitch2, yaw2;
+		rotation_matrix2.getRPY(roll2, pitch2, yaw2);
+		std::cout << "m_lastGlobalTf: "
+				  << m_lastGlobalTf.getOrigin().x() << ", " 
+				  << m_lastGlobalTf.getOrigin().y() << ", " 
+				  << m_lastGlobalTf.getOrigin().z() << ", " 
+				  << roll2 << ", " << pitch2 << ", " << yaw2 
+				  << std::endl;
+				  
 		// Prepare next iterations		
 		m_doUpdate = false;
 		m_init = true;
@@ -437,20 +586,26 @@ private:
 	double m_updateRate;
 	int m_alignMethod, m_solverMaxIter, m_solverMaxThreads;
 	ros::Time m_lastPeriodicUpdate;
-		
+	
+	sensor_msgs::PointCloud2 m_GlobalPcMsg;
+	ros::Publisher m_GlobalPcPub;
+	ros::Publisher lio_odom_pub_;   ///< lio odom数据发布, 发布全局坐标系下lidar的pose
+	
 	//! Node parameters
-	std::string m_inCloudTopic;
+	std::string m_inCloudTopic, m_initialPoseByOdomTopic;
 	std::string m_baseFrameId;
 	std::string m_odomFrameId;
 	std::string m_globalFrameId;
 	
 	//! ROS msgs and data
-	ros::NodeHandle m_nh;
+	ros::NodeHandle dll_nh;
 	tf::TransformBroadcaster m_tfBr;
 	tf::TransformListener m_tfListener;
     ros::Subscriber m_pcSub, m_initialPoseSub, m_imuSub;
 	ros::Timer updateTimer;
 	
+	nav_msgs::Odometry other_odom;
+
 	//! 3D distance drid
     Grid3d m_grid3d;
 		

@@ -70,8 +70,8 @@ private:
 	pcl::KdTreeFLANN<pcl::PointXYZ> m_kdtree;
 	
 	// Visualization of the map as pointcloud
-	sensor_msgs::PointCloud2 m_pcMsg;
-	ros::Publisher m_pcPub;
+	sensor_msgs::PointCloud2 m_MapPcMsg;
+	ros::Publisher m_MapPcPub;
 	ros::Timer mapTimer;
 			
 	// Visualization of a grid slice as 2D grid map msg
@@ -93,22 +93,20 @@ public:
 	{
 	  
 		// Load paraeters
-		double value;
 		ros::NodeHandle lnh("~");
 		m_nodeName = node_name;
-		if(!lnh.getParam("global_frame_id", m_globalFrameId))
+		if(!lnh.getParam("/dll_ns/global_frame_id", m_globalFrameId))
 			m_globalFrameId = "map";	
-		if(!lnh.getParam("map_path", m_mapPath))
+		if(!lnh.getParam("/dll_ns/map_path", m_mapPath))
 			m_mapPath = "map.ot";
-		if(!lnh.getParam("publish_point_cloud", m_publishPc))
+		if(!lnh.getParam("/dll_ns/publish_point_cloud", m_publishPc))
 			m_publishPc = false;
-		if(!lnh.getParam("publish_point_cloud_rate", m_publishPointCloudRate))
+		if(!lnh.getParam("/dll_ns/publish_point_cloud_rate", m_publishPointCloudRate))
 			m_publishPointCloudRate = 0.2;	
-		if(!lnh.getParam("publish_grid_slice", value))
-			value = -1.0;
-		if(!lnh.getParam("publish_grid_slice_rate", m_publishGridSliceRate))
+		if(!lnh.getParam("/dll_ns/publish_grid_slice", m_gridSlice))
+			m_gridSlice = 0.1;
+		if(!lnh.getParam("/dll_ns/publish_grid_slice_rate", m_publishGridSliceRate))
 			m_publishGridSliceRate = 0.2;
-		m_gridSlice = (float)value;
 		
 		// Load octomap 
 		m_octomap = NULL;
@@ -140,14 +138,15 @@ public:
 			if(m_gridSlice >= 0 && m_gridSlice <= m_maxZ)
 			{
 				buildGridSliceMsg(m_gridSlice);
-				m_gridSlicePub = m_nh.advertise<nav_msgs::OccupancyGrid>(node_name+"/grid_slice", 1, true);
+				m_gridSlicePub = m_nh.advertise<nav_msgs::OccupancyGrid>("grid_slice", 1, true);
 				gridTimer = m_nh.createTimer(ros::Duration(1.0/m_publishGridSliceRate), &Grid3d::publishGridSliceTimer, this);	
 			}
 			
 			// Setup point-cloud publisher
 			if(m_publishPc)
 			{
-				m_pcPub = m_nh.advertise<sensor_msgs::PointCloud2>(node_name+"/map_point_cloud", 1, true);
+				std::cout << "---publish map point_cloud" << std::endl;
+				m_MapPcPub = m_nh.advertise<sensor_msgs::PointCloud2>("map_point_cloud", 1, true);
 				mapTimer = m_nh.createTimer(ros::Duration(1.0/m_publishPointCloudRate), &Grid3d::publishMapPointCloudTimer, this);
 			}
 		}
@@ -168,7 +167,6 @@ public:
 	{
 	  
 		// Load paraeters
-		double value;
 		ros::NodeHandle lnh("~");
 		m_nodeName = node_name;
 		m_mapPath = map_path;
@@ -224,8 +222,8 @@ public:
   
 	void publishMapPointCloud(void)
 	{
-		m_pcMsg.header.stamp = ros::Time::now();
-		m_pcPub.publish(m_pcMsg);
+		m_MapPcMsg.header.stamp = ros::Time::now();
+		m_MapPcPub.publish(m_MapPcMsg);
 	}
 	
 	void publishGridSlice(void)
@@ -252,6 +250,13 @@ public:
 		return r;
 	}
 
+    // 核心功能：实现了三线性插值的系数计算，适用于规则三维网格中的插值问题。
+    // 关键步骤：
+    //     检查点是否在网格范围内。
+    //     提取邻点的值。
+    //     计算网格边界点和插值系数。
+    // 应用场景：
+    //     适用于三维网格数据的插值计算，比如距离场、体素网格、三维图像处理等。
 	TrilinearParams computeDistInterpolation(const double x, const double y, const double z)
 	{
 		TrilinearParams r;
@@ -261,7 +266,7 @@ public:
 			// Get 3D point index
 			uint64_t i = point2grid(x, y, z); 
 
-			// Get neightbour values to compute trilinear interpolation
+			// Get 8 neightbour values to compute trilinear interpolation
 			float c000, c001, c010, c011, c100, c101, c110, c111;
 			c000 = m_grid[i]*0.01; 
 			c001 = m_grid[i+m_gridStepZ]*0.01; 
@@ -506,6 +511,8 @@ protected:
 		m_offsetY = minY;
 		m_offsetZ = minZ;
 		m_resolution = (float)res;
+		std::cout << "m_resolution = " << m_resolution << std::endl;
+
 		m_oneDivRes = 1.0/m_resolution;
 		std::cout << "Map size:\n\tx: " << minX << " to " << maxX << std::endl;
 		std::cout << "\ty: " << minY << " to " << maxY << std::endl;
@@ -614,9 +621,11 @@ protected:
 		m_cloud->width = i;
 		m_cloud->points.resize(i);
 		
+		std::cout << "m_cloud->size() = " << m_cloud->size() << std::endl;
+		
 		// Create the point cloud msg for publication
-		pcl::toROSMsg(*m_cloud, m_pcMsg);
-		m_pcMsg.header.frame_id = m_globalFrameId;
+		pcl::toROSMsg(*m_cloud, m_MapPcMsg);
+		m_MapPcMsg.header.frame_id = m_globalFrameId;
 
 		// Create the ICP object for future registrations aginst the map
 		m_icp.setInputTarget(m_cloud);
